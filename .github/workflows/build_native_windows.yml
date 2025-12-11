@@ -119,8 +119,9 @@ jobs:
           Write-Host "Working now in:"; pwd
           Write-Host "Show (first 200 chars) of pyproject.toml:"; if (Test-Path pyproject.toml) { Get-Content pyproject.toml -Raw | Select-Object -First 200 | ForEach-Object { Write-Host $_ } }
 
-          # Use python -m build which works with PEP517 backends (scikit-build-core)
-          python -m pip install --upgrade build
+          # Ensure the PEP517 backend and build tooling are installed into the runner
+          # We will run `python -m build` with --no-isolation so these packages are used
+          python -m pip install --upgrade pip setuptools wheel build pyproject_hooks scikit-build-core cmake ninja
           if ('${{ inputs.enable_arrow }}' -eq 'true') {
             # Ensure vcpkg toolchain is known to CMake via environment variable
             $vc = "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
@@ -132,9 +133,9 @@ jobs:
           # Build wheel into dist/ (explicitly pass current directory to avoid ambiguous source detection)
           if ($builtViaFallback -eq $false) {
             Write-Host "Attempting explicit build targeting ./arbitrex (fallback)"
-            python -m build -w ./arbitrex
+            python -m build -w --no-isolation ./arbitrex
           } else {
-            python -m build -w .
+            python -m build -w --no-isolation .
             Pop-Location
           }
 
