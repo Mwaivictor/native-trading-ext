@@ -100,8 +100,16 @@ jobs:
             $env:CMAKE_ARGS = "-DBUILD_ARROW=OFF"
           }
 
-          # Use isolated build (do NOT use --no-isolation) so build-inside environment installs the backend
-          python -m build -w .
+          # Prefer using the runner-installed backend to avoid isolated env import issues.
+          # Try a no-isolation build first; if it fails, fall back to invoking scikit-build-core backend directly.
+          try {
+            Write-Host "Attempting no-isolation build (uses runner-installed backend)..."
+            python -m build --no-isolation -w .
+          } catch {
+            Write-Host "No-isolation build failed, attempting direct backend invocation as fallback..."
+            python -m pip install --upgrade scikit-build-core
+            python -m scikit_build_core.build_backend build_wheel .
+          }
 
           Pop-Location
 
