@@ -2,7 +2,7 @@ name: Build Native Windows Wheels
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -21,7 +21,7 @@ jobs:
         python-version: ['3.10', '3.11', '3.12']
 
     env:
-      VCPKG_ROOT: C:\vcpkg
+      VCPKG_ROOT: "C:\\vcpkg"
       BUILD_DIR: build
 
     steps:
@@ -50,9 +50,7 @@ jobs:
 
       - name: Install build deps
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install --upgrade setuptools wheel
-          # Pin build and scikit-build-core to known compatible versions
+          python -m pip install --upgrade pip setuptools wheel
           python -m pip install --upgrade "build>=1.3.0" "scikit-build-core==0.11.6" pyproject_hooks cmake ninja
 
       - name: Cache vcpkg
@@ -68,7 +66,9 @@ jobs:
 
       - name: Bootstrap vcpkg
         run: |
-          if (!(Test-Path $env:VCPKG_ROOT)) { git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT }
+          if (!(Test-Path $env:VCPKG_ROOT)) {
+            git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
+          }
           Push-Location $env:VCPKG_ROOT
           .\bootstrap-vcpkg.bat
           Pop-Location
@@ -84,25 +84,11 @@ jobs:
       - name: Build wheel
         run: |
           Write-Host "Building wheel for Python ${{ matrix.python-version }} (enable_arrow=${{ inputs.enable_arrow }})"
-          Push-Location ./arbitrex
-          # Diagnostic: show runner pip state and whether scikit-build-core is importable in runner
-          Write-Host "=== Runner pip packages ==="
-          python -m pip list
-          Write-Host "=== Attempt to locate scikit-build-core in runner ==="
-          python - <<'PY'
-import importlib.util, sys
-spec = importlib.util.find_spec('scikit_build_core')
-print('FOUND' if spec else 'MISSING')
-if spec:
-    print('origin:', getattr(spec, 'origin', None))
-PY
 
-          # Ensure the build backend and native helpers are available to the isolated build
+          Push-Location arbitrex
+
           python -m pip install --upgrade pip
-          # Install/pin the backend into the runner and ensure wheels are available for the isolated env
-          python -m pip install --upgrade "scikit-build-core==0.11.6" "build>=1.3.0" pyproject_hooks cmake ninja
-          # If Arrow/native helpers are needed, install pybind11/pyarrow so wheels are cached
-          python -m pip install --upgrade pybind11 pyarrow
+          python -m pip install --upgrade "scikit-build-core==0.11.6" "build>=1.3.0" pyproject_hooks cmake ninja pybind11 pyarrow
 
           if ('${{ inputs.enable_arrow }}' -eq 'true') {
             $vc = "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
@@ -111,51 +97,13 @@ PY
             $env:CMAKE_ARGS = "-DBUILD_ARROW=OFF"
           }
 
-          # Try: no-isolation build first with verbose logging so pip/install behavior is visible.
-          # If that fails, create a temporary venv locally to reproduce/inspect import/install behavior
-          try {
-            Write-Host "Attempting no-isolation build (uses runner-installed backend) with verbose logging..."
-            python -m build --no-isolation -w --verbose .
-          } catch {
-            Write-Host "No-isolation build failed. Collecting diagnostics and attempting local venv fallback..."
-
-            # Save any scikit-build-core wheels we can (helps pip use cached wheels during isolation)
-            if (!(Test-Path ./wheel_downloads)) { New-Item -ItemType Directory -Path ./wheel_downloads | Out-Null }
-            python -m pip download --no-deps --only-binary=:all: scikit-build-core -d ./wheel_downloads || Write-Host "pip download (binary) failed, continuing"
-
-            Write-Host "Creating temp venv at .\.buildenv to reproduce import/install behaviour"
-            python -m venv .buildenv
-            .\.buildenv\Scripts\python.exe -m pip install --upgrade pip
-            Write-Host "Packages in temp venv (before install):"
-            .\.buildenv\Scripts\python.exe -m pip list
-            Write-Host "Attempt to import scikit-build-core inside temp venv (before install):"
-            .\.buildenv\Scripts\python.exe - <<'PY'
-import importlib.util
-print(importlib.util.find_spec('scikit_build_core'))
-PY
-
-            Write-Host "Installing scikit-build-core into temp venv"
-            .\.buildenv\Scripts\python.exe -m pip install --upgrade scikit-build-core==0.11.6 || Write-Host "pip install scikit-build-core failed"
-            Write-Host "Packages in temp venv (after install):"
-            .\.buildenv\Scripts\python.exe -m pip list
-            Write-Host "Attempt to import scikit-build-core inside temp venv (after install):"
-            .\.buildenv\Scripts\python.exe - <<'PY'
-import importlib.util
-spec = importlib.util.find_spec('scikit_build_core')
-print('FOUND' if spec else 'MISSING')
-if spec:
-    print('origin:', getattr(spec, 'origin', None))
-PY
-
-            Write-Host "Attempting direct backend invocation using the temp venv as an extra diagnostic"
-            .\.buildenv\Scripts\python.exe -m scikit_build_core.build_backend build_wheel . || Write-Host "direct backend invocation failed in temp venv"
-          }
+          python -m build --no-isolation -w --verbose .
 
           Pop-Location
 
       - name: Package wheels
         run: |
-          Push-Location ./arbitrex/dist
+          Push-Location arbitrex/dist
           $zipName = "arbitrex-${{ matrix.python-version }}.zip"
           if (Test-Path $zipName) { Remove-Item $zipName -Force }
           Compress-Archive -Path * -DestinationPath $zipName
@@ -165,7 +113,7 @@ PY
         uses: actions/upload-artifact@v4
         with:
           name: arbitrex-wheels-py${{ matrix.python-version }}
-          path: ./arbitrex/dist/arbitrex-${{ matrix.python-version }}.zip
+          path: arbitrex/dist/arbitrex-${{ matrix.python-version }}.zip
 
       - name: Create Release
         id: create_release
