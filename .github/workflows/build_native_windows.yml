@@ -80,13 +80,18 @@ jobs:
       - name: Build wheel (scoped to `arbitrex` package)
         working-directory: ./arbitrex
         run: |
-          # Configure CMake to use vcpkg toolchain when Arrow is enabled
+          Write-Host "Building wheel for Python ${{ matrix.python-version }} (enable_arrow=${{ inputs.enable_arrow }})"
+          # Use python -m build which works with PEP517 backends (scikit-build-core)
+          python -m pip install --upgrade build
           if ('${{ inputs.enable_arrow }}' -eq 'true') {
-            setx CMAKE_TOOLCHAIN_FILE "$env:VCPKG_ROOT\\scripts\\buildsystems\\vcpkg.cmake"
-            python -m pip wheel . -w dist --global-option=-- -DCMAKE_ARGS="-DBUILD_ARROW=ON"
+            # Ensure vcpkg toolchain is known to CMake via environment variable
+            $vc = "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+            $env:CMAKE_ARGS = "-DBUILD_ARROW=ON -DCMAKE_TOOLCHAIN_FILE='$vc'"
           } else {
-            python -m pip wheel . -w dist --global-option=-- -DCMAKE_ARGS="-DBUILD_ARROW=OFF"
+            $env:CMAKE_ARGS = "-DBUILD_ARROW=OFF"
           }
+          # Build wheel into dist/
+          python -m build -w
 
       - name: Package wheel assets (per Python version)
         working-directory: ./
