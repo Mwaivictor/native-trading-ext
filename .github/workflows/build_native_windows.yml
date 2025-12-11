@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -99,9 +101,19 @@ jobs:
             Write-Host "Found ./pyproject.toml at repo root; using repo root"
             Push-Location ./
           } else {
-            Write-Host "No pyproject.toml found anywhere in workspace. Listing possible candidates..."
-            Get-ChildItem -Path $PWD -Recurse -Filter "*.toml" -File | ForEach-Object { Write-Host $_.FullName }
-            throw "No pyproject.toml found; cannot proceed with build."
+            Write-Host "No pyproject.toml found by search. Checking known locations..."
+            if (Test-Path ./arbitrex/pyproject.toml) {
+              Write-Host "Found ./arbitrex/pyproject.toml via fallback check; using ./arbitrex"
+              Push-Location ./arbitrex
+              $builtViaFallback = $true
+            } elseif (Test-Path ./pyproject.toml) {
+              Write-Host "Found ./pyproject.toml at repo root via fallback check; using repo root"
+              Push-Location ./
+              $builtViaFallback = $true
+            } else {
+              Write-Host "No pyproject.toml found anywhere. Will attempt explicit build targeting ./arbitrex as a last-resort fallback."
+              $builtViaFallback = $false
+            }
           }
 
           Write-Host "Working now in:"; pwd
@@ -118,8 +130,13 @@ jobs:
           }
 
           # Build wheel into dist/ (explicitly pass current directory to avoid ambiguous source detection)
-          python -m build -w .
-          Pop-Location
+          if ($builtViaFallback -eq $false) {
+            Write-Host "Attempting explicit build targeting ./arbitrex (fallback)"
+            python -m build -w ./arbitrex
+          } else {
+            python -m build -w .
+            Pop-Location
+          }
 
       - name: Package wheel assets (per Python version)
         working-directory: ./
