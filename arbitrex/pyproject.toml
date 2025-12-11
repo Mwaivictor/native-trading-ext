@@ -6,7 +6,7 @@ requires = [
   "wheel",
   "setuptools>=61.0",
 ]
-build-backend = "scikit_build_core.build_backend"
+build-backend = "scikit_build_core"
 
 [project]
 name = "arbitrex"
