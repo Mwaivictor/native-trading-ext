@@ -82,14 +82,21 @@ jobs:
         run: |
           Write-Host "Building wheel for Python ${{ matrix.python-version }} (enable_arrow=${{ inputs.enable_arrow }})"
           Push-Location ./arbitrex
-          python -m pip install --upgrade pip setuptools wheel build scikit-build-core pyproject_hooks cmake ninja
+
+          # Ensure the build backend and native helpers are available to the isolated build
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade scikit-build-core cmake ninja pybind11 pyarrow
+
           if ('${{ inputs.enable_arrow }}' -eq 'true') {
             $vc = "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
-            $env:CMAKE_ARGS = "-DBUILD_ARROW=ON -DCMAKE_TOOLCHAIN_FILE='$vc'"
+            $env:CMAKE_ARGS = "-DBUILD_ARROW=ON -DCMAKE_TOOLCHAIN_FILE=$vc"
           } else {
             $env:CMAKE_ARGS = "-DBUILD_ARROW=OFF"
           }
-          python -m build --no-isolation -w .
+
+          # Use isolated build (do NOT use --no-isolation) so build-inside environment installs the backend
+          python -m build -w .
+
           Pop-Location
 
       - name: Package wheels
