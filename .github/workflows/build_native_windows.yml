@@ -85,6 +85,17 @@ jobs:
         run: |
           Write-Host "Building wheel for Python ${{ matrix.python-version }} (enable_arrow=${{ inputs.enable_arrow }})"
           Push-Location ./arbitrex
+          # Diagnostic: show runner pip state and whether scikit-build-core is importable in runner
+          Write-Host "=== Runner pip packages ==="
+          python -m pip list
+          Write-Host "=== Attempt to locate scikit-build-core in runner ==="
+          python - <<'PY'
+import importlib.util, sys
+spec = importlib.util.find_spec('scikit_build_core')
+print('FOUND' if spec else 'MISSING')
+if spec:
+    print('origin:', getattr(spec, 'origin', None))
+PY
 
           # Ensure the build backend and native helpers are available to the isolated build
           python -m pip install --upgrade pip
@@ -100,15 +111,44 @@ jobs:
             $env:CMAKE_ARGS = "-DBUILD_ARROW=OFF"
           }
 
-          # Prefer using the runner-installed backend to avoid isolated env import issues.
-          # Try a no-isolation build first; if it fails, fall back to invoking scikit-build-core backend directly.
+          # Try: no-isolation build first with verbose logging so pip/install behavior is visible.
+          # If that fails, create a temporary venv locally to reproduce/inspect import/install behavior
           try {
-            Write-Host "Attempting no-isolation build (uses runner-installed backend)..."
-            python -m build --no-isolation -w .
+            Write-Host "Attempting no-isolation build (uses runner-installed backend) with verbose logging..."
+            python -m build --no-isolation -w --verbose .
           } catch {
-            Write-Host "No-isolation build failed, attempting direct backend invocation as fallback..."
-            python -m pip install --upgrade scikit-build-core
-            python -m scikit_build_core.build_backend build_wheel .
+            Write-Host "No-isolation build failed. Collecting diagnostics and attempting local venv fallback..."
+
+            # Save any scikit-build-core wheels we can (helps pip use cached wheels during isolation)
+            if (!(Test-Path ./wheel_downloads)) { New-Item -ItemType Directory -Path ./wheel_downloads | Out-Null }
+            python -m pip download --no-deps --only-binary=:all: scikit-build-core -d ./wheel_downloads || Write-Host "pip download (binary) failed, continuing"
+
+            Write-Host "Creating temp venv at .\.buildenv to reproduce import/install behaviour"
+            python -m venv .buildenv
+            .\.buildenv\Scripts\python.exe -m pip install --upgrade pip
+            Write-Host "Packages in temp venv (before install):"
+            .\.buildenv\Scripts\python.exe -m pip list
+            Write-Host "Attempt to import scikit-build-core inside temp venv (before install):"
+            .\.buildenv\Scripts\python.exe - <<'PY'
+import importlib.util
+print(importlib.util.find_spec('scikit_build_core'))
+PY
+
+            Write-Host "Installing scikit-build-core into temp venv"
+            .\.buildenv\Scripts\python.exe -m pip install --upgrade scikit-build-core==0.11.6 || Write-Host "pip install scikit-build-core failed"
+            Write-Host "Packages in temp venv (after install):"
+            .\.buildenv\Scripts\python.exe -m pip list
+            Write-Host "Attempt to import scikit-build-core inside temp venv (after install):"
+            .\.buildenv\Scripts\python.exe - <<'PY'
+import importlib.util
+spec = importlib.util.find_spec('scikit_build_core')
+print('FOUND' if spec else 'MISSING')
+if spec:
+    print('origin:', getattr(spec, 'origin', None))
+PY
+
+            Write-Host "Attempting direct backend invocation using the temp venv as an extra diagnostic"
+            .\.buildenv\Scripts\python.exe -m scikit_build_core.build_backend build_wheel . || Write-Host "direct backend invocation failed in temp venv"
           }
 
           Pop-Location
