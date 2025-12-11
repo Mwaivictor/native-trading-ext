@@ -77,17 +77,36 @@ jobs:
           .\vcpkg.exe install arrow:x64-windows-static
           Pop-Location
 
-      - name: Build wheel (scoped to `arbitrex` package)
-        working-directory: ./arbitrex
+      - name: Build wheel (auto-detect project dir)
         run: |
           Write-Host "Building wheel for Python ${{ matrix.python-version }} (enable_arrow=${{ inputs.enable_arrow }})"
           # Diagnostics: show current directory and files to help CI debugging
-          Write-Host "Current directory:"
-          pwd
-          Write-Host "Directory listing (root of project):"
-          Get-ChildItem -Force | ForEach-Object { Write-Host $_.Name }
-          Write-Host "Show pyproject.toml (if present):"
-          if (Test-Path pyproject.toml) { Get-Content pyproject.toml -Raw | Select-Object -First 200 | ForEach-Object { Write-Host $_ } } else { Write-Host "pyproject.toml not found in working directory." }
+          Write-Host "Runner working directory:"; pwd
+          Write-Host "Top-level listing:"; Get-ChildItem -Force | ForEach-Object { Write-Host $_.Name }
+
+          # Try to locate pyproject.toml anywhere in the checkout
+          Write-Host "Searching for pyproject.toml under the workspace..."
+          $proj = Get-ChildItem -Path $PWD -Recurse -Filter pyproject.toml -File -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($proj) {
+            Write-Host "Found pyproject.toml at: $($proj.FullName)"
+            $projDir = Split-Path $proj.FullName -Parent
+            Write-Host "Using project directory: $projDir"
+            Push-Location $projDir
+          } elseif (Test-Path ./arbitrex/pyproject.toml) {
+            Write-Host "Found ./arbitrex/pyproject.toml; using ./arbitrex"
+            Push-Location ./arbitrex
+          } elseif (Test-Path ./pyproject.toml) {
+            Write-Host "Found ./pyproject.toml at repo root; using repo root"
+            Push-Location ./
+          } else {
+            Write-Host "No pyproject.toml found anywhere in workspace. Listing possible candidates..."
+            Get-ChildItem -Path $PWD -Recurse -Filter "*.toml" -File | ForEach-Object { Write-Host $_.FullName }
+            throw "No pyproject.toml found; cannot proceed with build."
+          }
+
+          Write-Host "Working now in:"; pwd
+          Write-Host "Show (first 200 chars) of pyproject.toml:"; if (Test-Path pyproject.toml) { Get-Content pyproject.toml -Raw | Select-Object -First 200 | ForEach-Object { Write-Host $_ } }
+
           # Use python -m build which works with PEP517 backends (scikit-build-core)
           python -m pip install --upgrade build
           if ('${{ inputs.enable_arrow }}' -eq 'true') {
@@ -97,8 +116,10 @@ jobs:
           } else {
             $env:CMAKE_ARGS = "-DBUILD_ARROW=OFF"
           }
+
           # Build wheel into dist/ (explicitly pass current directory to avoid ambiguous source detection)
           python -m build -w .
+          Pop-Location
 
       - name: Package wheel assets (per Python version)
         working-directory: ./
