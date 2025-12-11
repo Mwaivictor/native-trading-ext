@@ -119,21 +119,11 @@ jobs:
           Write-Host "Found wheel: $($whl.FullName)"
 
           python -m venv .testenv
-          .\.testenv\Scripts\python.exe -m pip install --upgrade pip
-          .\.testenv\Scripts\python.exe -m pip install --upgrade setuptools wheel
+          .\.testenv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
           .\.testenv\Scripts\python.exe -m pip install --no-deps --force-reinstall "$($whl.FullName)"
 
-          Write-Host "Attempting to import package in fresh venv"
-          .\.testenv\Scripts\python.exe - <<'PY'
-import importlib, traceback, sys
-try:
-    m = importlib.import_module('arbitrex')
-    print('import OK, module:', getattr(m, '__name__', None))
-    # If the native extension module name is different (e.g. arbitrex._native), consider checking that too
-except Exception:
-    traceback.print_exc()
-    sys.exit(2)
-PY
+            Write-Host "Attempting to import package in fresh venv"
+            .\.testenv\Scripts\python.exe -c "import importlib,traceback,sys; try: m=importlib.import_module('arbitrex'); print('import OK, module:', getattr(m,'__name__',None)); except Exception: traceback.print_exc(); sys.exit(2)"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
