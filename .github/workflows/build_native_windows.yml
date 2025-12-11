@@ -81,6 +81,13 @@ jobs:
         working-directory: ./arbitrex
         run: |
           Write-Host "Building wheel for Python ${{ matrix.python-version }} (enable_arrow=${{ inputs.enable_arrow }})"
+          # Diagnostics: show current directory and files to help CI debugging
+          Write-Host "Current directory:"
+          pwd
+          Write-Host "Directory listing (root of project):"
+          Get-ChildItem -Force | ForEach-Object { Write-Host $_.Name }
+          Write-Host "Show pyproject.toml (if present):"
+          if (Test-Path pyproject.toml) { Get-Content pyproject.toml -Raw | Select-Object -First 200 | ForEach-Object { Write-Host $_ } } else { Write-Host "pyproject.toml not found in working directory." }
           # Use python -m build which works with PEP517 backends (scikit-build-core)
           python -m pip install --upgrade build
           if ('${{ inputs.enable_arrow }}' -eq 'true') {
@@ -90,8 +97,8 @@ jobs:
           } else {
             $env:CMAKE_ARGS = "-DBUILD_ARROW=OFF"
           }
-          # Build wheel into dist/
-          python -m build -w
+          # Build wheel into dist/ (explicitly pass current directory to avoid ambiguous source detection)
+          python -m build -w .
 
       - name: Package wheel assets (per Python version)
         working-directory: ./
