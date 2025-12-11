@@ -11,152 +11,136 @@ on:
       on:
         push:
           branches: [ main ]
-          tags: ['v*']
-        workflow_dispatch:
-          inputs:
-            enable_arrow:
-              description: 'Set to "true" to build Arrow-enabled wheel (slower).'
-              required: false
-              default: 'false'
+          name: Build Native Windows Wheels
 
-      jobs:
-        build-wheels-windows:
-          runs-on: windows-latest
-          strategy:
-            fail-fast: false
-            matrix:
-              python-version: ['3.10', '3.11', '3.12']
+          on:
+            push:
+              branches: [ main ]
+              tags: ['v*']
+            workflow_dispatch:
+              inputs:
+                enable_arrow:
+                  description: 'Set to "true" to build Arrow-enabled wheel (slower).'
+                  required: false
+                  default: 'false'
 
-          env:
-            VCPKG_ROOT: C:\\vcpkg
-            BUILD_DIR: build
+          jobs:
+            build-wheels-windows:
+              runs-on: windows-latest
+              strategy:
+                fail-fast: false
+                matrix:
+                  python-version: ['3.10', '3.11', '3.12']
 
-          steps:
-            - name: Checkout
-              uses: actions/checkout@v4
-              name: Build Native Windows Wheels
+              env:
+                VCPKG_ROOT: C:\\vcpkg
+                BUILD_DIR: build
 
-              on:
-                push:
-                  branches: [ main ]
-                  tags: ['v*']
-                workflow_dispatch:
-                  inputs:
-                    enable_arrow:
-                      description: 'Set to "true" to build Arrow-enabled wheel (slower).'
-                      required: false
-                      default: 'false'
+              steps:
+                - name: Checkout
+                  uses: actions/checkout@v4
+                  with:
+                    fetch-depth: 0
 
-              jobs:
-                build-wheels-windows:
-                  runs-on: windows-latest
-                  strategy:
-                    fail-fast: false
-                    matrix:
-                      python-version: ['3.10', '3.11', '3.12']
+                - name: Setup Python
+                  uses: actions/setup-python@v4
+                  with:
+                    python-version: ${{ matrix.python-version }}
 
+                - name: Ensure pip
+                  run: |
+                    python -m ensurepip --upgrade || echo "ensurepip not available"
+                    python -m pip --version || python -m pip install --upgrade pip
+
+                - name: Cache pip
+                  uses: actions/cache@v4
+                  with:
+                    path: ~/.cache/pip
+                    key: pip-${{ matrix.python-version }}-${{ runner.os }}-${{ hashFiles('**/pyproject.toml') }}
+                    restore-keys: |
+                      pip-${{ matrix.python-version }}-${{ runner.os }}-
+
+                - name: Install build deps
+                  run: |
+                    python -m pip install --upgrade pip setuptools wheel build pyproject_hooks scikit-build-core cmake ninja
+
+                - name: Cache vcpkg
+                  uses: actions/cache@v4
+                  with:
+                    path: |
+                      C:\\vcpkg\\downloads
+                      C:\\vcpkg\\buildtrees
+                      C:\\vcpkg\\packages
+                    key: vcpkg-${{ runner.os }}-v1
+                    restore-keys: |
+                      vcpkg-${{ runner.os }}-
+
+                - name: Bootstrap vcpkg
+                  run: |
+                    if (!(Test-Path $env:VCPKG_ROOT)) { git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT }
+                    Push-Location $env:VCPKG_ROOT
+                    .\bootstrap-vcpkg.bat
+                    Pop-Location
+
+                - name: Install vcpkg ports (arrow)
+                  if: ${{ inputs.enable_arrow == 'true' }}
+                  run: |
+                    Push-Location $env:VCPKG_ROOT
+                    .\vcpkg.exe install thrift:x64-windows-static
+                    .\vcpkg.exe install arrow:x64-windows-static
+                    Pop-Location
+
+                - name: Build wheel
+                  run: |
+                    Write-Host "Building wheel for Python ${{ matrix.python-version }} (enable_arrow=${{ inputs.enable_arrow }})"
+                    Push-Location ./arbitrex
+                    python -m pip install --upgrade pip setuptools wheel build scikit-build-core pyproject_hooks cmake ninja
+                    if ('${{ inputs.enable_arrow }}' -eq 'true') {
+                      $vc = "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+                      $env:CMAKE_ARGS = "-DBUILD_ARROW=ON -DCMAKE_TOOLCHAIN_FILE='$vc'"
+                    } else {
+                      $env:CMAKE_ARGS = "-DBUILD_ARROW=OFF"
+                    }
+                    python -m build --no-isolation -w .
+                    Pop-Location
+
+                - name: Package wheels
+                  run: |
+                    Push-Location ./arbitrex/dist
+                    $zipName = "arbitrex-${{ matrix.python-version }}.zip"
+                    if (Test-Path $zipName) { Remove-Item $zipName -Force }
+                    Compress-Archive -Path * -DestinationPath $zipName
+                    Pop-Location
+
+                - name: Upload artifact
+                  uses: actions/upload-artifact@v4
+                  with:
+                    name: arbitrex-wheels-py${{ matrix.python-version }}
+                    path: ./arbitrex/dist/arbitrex-${{ matrix.python-version }}.zip
+
+                - name: Create Release
+                  id: create_release
+                  if: startsWith(github.ref, 'refs/tags/')
+                  uses: actions/create-release@v1
+                  with:
+                    tag_name: ${{ github.ref_name }}
+                    release_name: Release ${{ github.ref_name }}
+                    draft: false
+                    prerelease: false
                   env:
-                    VCPKG_ROOT: C:\\vcpkg
-                    BUILD_DIR: build
+                    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-                  steps:
-                    - name: Checkout
-                      uses: actions/checkout@v4
-                      with:
-                        fetch-depth: 0
-
-                    - name: Setup Python
-                      uses: actions/setup-python@v4
-                      with:
-                        python-version: ${{ matrix.python-version }}
-
-                    - name: Ensure pip
-                      run: |
-                        python -m ensurepip --upgrade || echo "ensurepip not available"
-                        python -m pip --version || python -m pip install --upgrade pip
-
-                    - name: Cache pip
-                      uses: actions/cache@v4
-                      with:
-                        path: ~/.cache/pip
-                        key: pip-${{ matrix.python-version }}-${{ runner.os }}-${{ hashFiles('**/pyproject.toml') }}
-                        restore-keys: |
-                          pip-${{ matrix.python-version }}-${{ runner.os }}-
-
-                    - name: Install build deps
-                      run: |
-                        python -m pip install --upgrade pip setuptools wheel build pyproject_hooks scikit-build-core cmake ninja
-
-                    - name: Cache vcpkg
-                      uses: actions/cache@v4
-                      with:
-                        path: |
-                          C:\\vcpkg\\downloads
-                          C:\\vcpkg\\buildtrees
-                          C:\\vcpkg\\packages
-                        key: vcpkg-${{ runner.os }}-v1
-                        restore-keys: |
-                          vcpkg-${{ runner.os }}-
-
-                    - name: Bootstrap vcpkg
-                      run: |
-                        if (!(Test-Path $env:VCPKG_ROOT)) { git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT }
-                        Push-Location $env:VCPKG_ROOT
-                        .\bootstrap-vcpkg.bat
-                        Pop-Location
-
-                    - name: Install vcpkg ports (arrow)
-                      if: ${{ inputs.enable_arrow == 'true' }}
-                      run: |
-                        Push-Location $env:VCPKG_ROOT
-                        .\vcpkg.exe install thrift:x64-windows-static
-                        .\vcpkg.exe install arrow:x64-windows-static
-                        Pop-Location
-
-                    - name: Build wheel
-                      run: |
-                        Write-Host "Building wheel for Python ${{ matrix.python-version }} (enable_arrow=${{ inputs.enable_arrow }})"
-                        Push-Location ./arbitrex
-                        python -m pip install --upgrade pip setuptools wheel build scikit-build-core pyproject_hooks cmake ninja
-                        if ('${{ inputs.enable_arrow }}' -eq 'true') {
-                          $vc = "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
-                          $env:CMAKE_ARGS = "-DBUILD_ARROW=ON -DCMAKE_TOOLCHAIN_FILE='$vc'"
-                        } else {
-                          $env:CMAKE_ARGS = "-DBUILD_ARROW=OFF"
-                        }
-                        python -m build --no-isolation -w .
-                        Pop-Location
-
-                    - name: Package wheels
-                      run: |
-                        Push-Location ./arbitrex/dist
-                        $zipName = "arbitrex-${{ matrix.python-version }}.zip"
-                        if (Test-Path $zipName) { Remove-Item $zipName -Force }
-                        Compress-Archive -Path * -DestinationPath $zipName
-                        Pop-Location
-
-                    - name: Upload artifact
-                      uses: actions/upload-artifact@v4
-                      with:
-                        name: arbitrex-wheels-py${{ matrix.python-version }}
-                        path: ./arbitrex/dist/arbitrex-${{ matrix.python-version }}.zip
-
-                    - name: Create Release
-                      id: create_release
-                      if: startsWith(github.ref, 'refs/tags/')
-                      uses: actions/create-release@v1
-                      with:
-                        tag_name: ${{ github.ref_name }}
-                        release_name: Release ${{ github.ref_name }}
-                        draft: false
-                        prerelease: false
-                      env:
-                        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-                    - name: Upload release asset
-                      if: startsWith(github.ref, 'refs/tags/')
-                      env:
-                        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                - name: Upload release asset
+                  if: startsWith(github.ref, 'refs/tags/')
+                  env:
+                    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  run: |
+                    $upload_url='${{ steps.create_release.outputs.upload_url }}'
+                    $base = $upload_url -replace '\{\?name,label\}',''
+                    $asset_path="${{ github.workspace }}\arbitrex\dist\arbitrex-${{ matrix.python-version }}.zip"
+                    $asset_name="arbitrex-wheels-py${{ matrix.python-version }}.zip"
+                    $uri="$base?name=$asset_name"
+                    curl -sS -X POST -H "Authorization: token $env:GITHUB_TOKEN" -H "Content-Type: application/zip" --data-binary "@$asset_path" "$uri"
                       run: |
                         $upload_url='${{ steps.create_release.outputs.upload_url }}'
                         $base = $upload_url -replace '\{\?name,label\}',''
