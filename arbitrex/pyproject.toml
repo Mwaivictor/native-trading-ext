@@ -5,7 +5,7 @@ requires = [
   "wheel>=0.38.4",
   "pyproject-hooks>=1.0",
 ]
-build-backend = "scikit_build_core.build_backend"
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "arbitrex"
@@ -24,4 +24,9 @@ dependencies = [
 
 [tool.scikit-build]
 # Build CMake project located in the `native` subdirectory
-cmake-source-dir = "native"
+# 'cmake' is the correct option name for the CMake source directory.
+# 'build-dir' controls the out-of-source build directory used by scikit-build.
+# 'sdist' toggles whether to include scikit-build's sdist generation behavior.
+cmake = "native"
+build-dir = "build"
+sdist = true
